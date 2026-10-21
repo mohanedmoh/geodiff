@@ -139,6 +139,7 @@ bool _test_no_rebase_needed(
   const std::string &modifiedB,
   const std::string &testname,
   int expected_changes_A,
+  int expected_changes_AB,
   bool expect_changeset_file_does_not_exist
 )
 {
@@ -171,15 +172,16 @@ bool _test_no_rebase_needed(
 
   if ( expect_changeset_file_does_not_exist )
   {
-    return !fileexists( changesetAB );
+    if ( fileexists( changesetAB ) )
+      return false;
   }
   else
   {
     if ( !fileexists( changesetAB ) )
       return false;
 
-    int nchanges = GEODIFF_changesCount( testContext(), changesetbaseA.c_str() );
-    if ( nchanges != expected_changes_A )
+    int nchanges = GEODIFF_changesCount( testContext(), changesetAB.c_str() );
+    if ( nchanges != expected_changes_AB )
     {
       std::string json = pathjoin( tmpdir(), testname, testname + ".json" );
       std::string json_summary = pathjoin( tmpdir(), testname, testname + "_summary.json" );
@@ -660,23 +662,25 @@ TEST( ConcurrentCommitsSqlite3Test, test_no_rebase_needed )
 {
   std::cout << "test when rebase is not needed" << std::endl;
 
+  std::cout << "expected result: BASE == THEIR, our changeset copied" << std::endl;
+  ASSERT_TRUE( _test_no_rebase_needed(
+                 pathjoin( testdir(), "base.gpkg" ),
+                 pathjoin( testdir(), "base.gpkg" ),
+                 pathjoin( testdir(), "2_updates", "updated_A.gpkg" ),
+                 "no_rebase_BASE_eq_THEIRS",
+                 0,
+                 1,
+                 false // expecting our changeset
+               ) );
+
   std::cout << "expected result: BASE == OUR, no changeset created" << std::endl;
   ASSERT_TRUE( _test_no_rebase_needed(
                  pathjoin( testdir(), "base.gpkg" ),
-                 pathjoin( testdir(), "base.gpkg" ),
                  pathjoin( testdir(), "2_updates", "updated_A.gpkg" ),
+                 pathjoin( testdir(), "base.gpkg" ),
                  "no_rebase_BASE_eq_OURS",
-                 0,
-                 true // no changeset created
-               ) );
-
-  std::cout << "expected result: BASE == THEIR, no changeset created" << std::endl;
-  ASSERT_TRUE( _test_no_rebase_needed(
-                 pathjoin( testdir(), "base.gpkg" ),
-                 pathjoin( testdir(), "2_updates", "updated_A.gpkg" ),
-                 pathjoin( testdir(), "base.gpkg" ),
-                 "no_rebase_BASE_eq_THEIRS",
                  1,
+                 0,
                  true // no changeset created
                ) );
 
@@ -687,8 +691,65 @@ TEST( ConcurrentCommitsSqlite3Test, test_no_rebase_needed )
                  pathjoin( testdir(), "2_updates", "updated_A.gpkg" ),
                  "no_rebase_THEIR_eq_OURS",
                  1,
+                 0,
                  false // expecting empty changeset
                ) );
+
+  std::cout << "expected result: BASE == THEIR == OUR, empty changeset created" << std::endl;
+  ASSERT_TRUE( _test_no_rebase_needed(
+                 pathjoin( testdir(), "base.gpkg" ),
+                 pathjoin( testdir(), "base.gpkg" ),
+                 pathjoin( testdir(), "base.gpkg" ),
+                 "no_rebase_BASE_eq_THEIR_eq_OURS",
+                 0,
+                 0,
+                 false // expecting empty changeset
+               ) );
+}
+
+TEST( ConcurrentCommitsSqlite3Test, test_create_rebased_changeset_empty_inputs )
+{
+  const struct
+  {
+    const char *name;
+    bool emptyOurs;
+    bool emptyTheirs;
+  } cases[] =
+  {
+    { "empty_theirs", false, true },
+    { "empty_ours", true, false },
+    { "both_empty", true, true }
+  };
+
+  std::string base = pathjoin( testdir(), "base.gpkg" );
+  std::string nonempty = pathjoin( testdir(), "rebase_conflict", "case1a.diff" );
+  ASSERT_EQ( 1, GEODIFF_hasChanges( testContext(), nonempty.c_str() ) );
+
+  for ( const auto &testCase : cases )
+  {
+    SCOPED_TRACE( testCase.name );
+    std::string dir = pathjoin( tmpdir(), std::string( "rebase_" ) + testCase.name );
+    makedir( dir );
+    std::string ours = pathjoin( dir, "ours.diff" );
+    std::string theirs = pathjoin( dir, "theirs.diff" );
+    std::string rebased = pathjoin( dir, "rebased.diff" );
+    std::string conflicts = pathjoin( dir, "conflicts.json" );
+    ASSERT_TRUE( testCase.emptyOurs ? flushString( ours, "" ) : filecopy( ours, nonempty ) );
+    ASSERT_TRUE( testCase.emptyTheirs ? flushString( theirs, "" ) : filecopy( theirs, nonempty ) );
+    ASSERT_TRUE( flushString( rebased, "stale output" ) );
+    fileremove( conflicts );
+
+    ASSERT_EQ( GEODIFF_SUCCESS, GEODIFF_createRebasedChangesetEx( testContext(), "sqlite", "", base.c_str(),
+               ours.c_str(), theirs.c_str(), rebased.c_str(), conflicts.c_str() ) );
+
+    EXPECT_TRUE( testCase.emptyOurs ? isFileEmpty( ours ) : fileContentEquals( ours, nonempty ) );
+    EXPECT_TRUE( testCase.emptyTheirs ? isFileEmpty( theirs ) : fileContentEquals( theirs, nonempty ) );
+    EXPECT_FALSE( fileexists( conflicts ) );
+    if ( testCase.emptyTheirs )
+      EXPECT_TRUE( fileContentEquals( rebased, ours ) );
+    else
+      EXPECT_FALSE( fileexists( rebased ) );
+  }
 }
 
 int main( int argc, char **argv )
