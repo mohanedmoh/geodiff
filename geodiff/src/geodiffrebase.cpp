@@ -645,6 +645,8 @@ void rebase(
   if ( reader_BASE_MODIFIED.isEmpty() )
   {
     context->logger().info( " -- no rebase needed! (empty base2modified) --\n" );
+    ChangesetWriter writer;
+    writer.open( changeset_THEIRS_MODIFIED );
     return;
   }
 

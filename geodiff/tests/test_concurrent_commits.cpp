@@ -139,7 +139,6 @@ bool _test_no_rebase_needed(
   const std::string &modifiedB,
   const std::string &testname,
   int expected_changes_A,
-  int expected_changes_AB,
   bool expect_changeset_file_does_not_exist
 )
 {
@@ -172,16 +171,15 @@ bool _test_no_rebase_needed(
 
   if ( expect_changeset_file_does_not_exist )
   {
-    if ( fileexists( changesetAB ) )
-      return false;
+    return !fileexists( changesetAB );
   }
   else
   {
     if ( !fileexists( changesetAB ) )
       return false;
 
-    int nchanges = GEODIFF_changesCount( testContext(), changesetAB.c_str() );
-    if ( nchanges != expected_changes_AB )
+    int nchanges = GEODIFF_changesCount( testContext(), changesetbaseA.c_str() );
+    if ( nchanges != expected_changes_A )
     {
       std::string json = pathjoin( tmpdir(), testname, testname + ".json" );
       std::string json_summary = pathjoin( tmpdir(), testname, testname + "_summary.json" );
@@ -662,26 +660,24 @@ TEST( ConcurrentCommitsSqlite3Test, test_no_rebase_needed )
 {
   std::cout << "test when rebase is not needed" << std::endl;
 
-  std::cout << "expected result: BASE == THEIR, our changeset copied" << std::endl;
+  std::cout << "expected result: our changeset copied" << std::endl;
   ASSERT_TRUE( _test_no_rebase_needed(
                  pathjoin( testdir(), "base.gpkg" ),
                  pathjoin( testdir(), "base.gpkg" ),
                  pathjoin( testdir(), "2_updates", "updated_A.gpkg" ),
-                 "no_rebase_BASE_eq_THEIRS",
+                 "no_rebase_BASE_eq_OURS",
                  0,
-                 1,
                  false // expecting our changeset
                ) );
 
-  std::cout << "expected result: BASE == OUR, no changeset created" << std::endl;
+  std::cout << "expected result: empty changeset created" << std::endl;
   ASSERT_TRUE( _test_no_rebase_needed(
                  pathjoin( testdir(), "base.gpkg" ),
                  pathjoin( testdir(), "2_updates", "updated_A.gpkg" ),
                  pathjoin( testdir(), "base.gpkg" ),
-                 "no_rebase_BASE_eq_OURS",
+                 "no_rebase_BASE_eq_THEIRS",
                  1,
-                 0,
-                 true // no changeset created
+                 false // expecting empty changeset
                ) );
 
   std::cout << "expected result: THEIR == OUR, empty changeset created" << std::endl;
@@ -691,7 +687,6 @@ TEST( ConcurrentCommitsSqlite3Test, test_no_rebase_needed )
                  pathjoin( testdir(), "2_updates", "updated_A.gpkg" ),
                  "no_rebase_THEIR_eq_OURS",
                  1,
-                 0,
                  false // expecting empty changeset
                ) );
 
@@ -701,7 +696,6 @@ TEST( ConcurrentCommitsSqlite3Test, test_no_rebase_needed )
                  pathjoin( testdir(), "base.gpkg" ),
                  pathjoin( testdir(), "base.gpkg" ),
                  "no_rebase_BASE_eq_THEIR_eq_OURS",
-                 0,
                  0,
                  false // expecting empty changeset
                ) );
@@ -745,10 +739,11 @@ TEST( ConcurrentCommitsSqlite3Test, test_create_rebased_changeset_empty_inputs )
     EXPECT_TRUE( testCase.emptyOurs ? isFileEmpty( ours ) : fileContentEquals( ours, nonempty ) );
     EXPECT_TRUE( testCase.emptyTheirs ? isFileEmpty( theirs ) : fileContentEquals( theirs, nonempty ) );
     EXPECT_FALSE( fileexists( conflicts ) );
+    ASSERT_TRUE( fileexists( rebased ) );
     if ( testCase.emptyTheirs )
       EXPECT_TRUE( fileContentEquals( rebased, ours ) );
     else
-      EXPECT_FALSE( fileexists( rebased ) );
+      EXPECT_TRUE( isFileEmpty( rebased ) );
   }
 }
 
